@@ -41,8 +41,10 @@ export function getChangedFilesForPush(
         baseRef = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
     }
 
+    const cmd = `git diff --name-status -M ${baseRef}..HEAD`;
+    console.log(`[gty] Running diff command: ${cmd}`);
     return parseDiffOutput(
-        execSync(`git diff --name-status -M ${baseRef}..HEAD`, { cwd, encoding: 'utf8' })
+        execSync(cmd, { cwd, encoding: 'utf8' })
     );
 }
 
@@ -62,8 +64,10 @@ export function getChangedFilesSinceRemote(cwd: string): GitChange[] {
         baseRef = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
     }
 
+    const cmd = `git diff --name-status -M ${baseRef}..HEAD`;
+    console.log(`[gty] Running diff command: ${cmd}`);
     return parseDiffOutput(
-        execSync(`git diff --name-status -M ${baseRef}..HEAD`, { cwd, encoding: 'utf8' })
+        execSync(cmd, { cwd, encoding: 'utf8' })
     );
 }
 
