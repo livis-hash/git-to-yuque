@@ -35,11 +35,13 @@ function buildTocIndex(items: YuqueTocItem[]): TocIndex {
     }
 
     // Build full path for each node by traversing parent chain
-    function getFullPath(uuid: string): string {
+    function getFullPath(uuid: string, visited = new Set<string>()): string {
+        if (visited.has(uuid)) return ''; // cycle guard
         const item = uuidToItem.get(uuid);
         if (!item) return '';
         if (!item.parent_uuid) return item.title;
-        const parentPath = getFullPath(item.parent_uuid);
+        visited.add(uuid);
+        const parentPath = getFullPath(item.parent_uuid, visited);
         return parentPath ? `${parentPath}/${item.title}` : item.title;
     }
 

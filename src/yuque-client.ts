@@ -13,6 +13,11 @@ export class YuqueClient {
 
     constructor(config: GtyConfig) {
         this.config = config;
+        if (!config.token) {
+            throw new Error(
+                'Yuque API token is missing. Set it in .gty.yml or via the GTY_TOKEN environment variable.'
+            );
+        }
         this.client = axios.create({
             baseURL: config.baseUrl,
             headers: {
@@ -22,6 +27,31 @@ export class YuqueClient {
             },
             timeout: 30000,
         });
+    }
+
+    /**
+     * Retry an async API call up to maxRetries times on 429 (rate-limit) responses.
+     * Uses exponential backoff: 1s, 2s, 4s, ...
+     */
+    private async retryRequest<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+        let delay = 1000;
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                return await fn();
+            } catch (err) {
+                const is429 = axios.isAxiosError(err) && err.response?.status === 429;
+                if (is429 && attempt < maxRetries) {
+                    const retryAfter = Number(err.response?.headers?.['retry-after']) || delay / 1000;
+                    const waitMs = retryAfter * 1000;
+                    console.warn(`[gty] Rate limited by Yuque (429). Retrying in ${retryAfter}s... (${attempt + 1}/${maxRetries})`);
+                    await new Promise(r => setTimeout(r, waitMs));
+                    delay *= 2;
+                    continue;
+                }
+                throw err;
+            }
+        }
+        throw new Error('retryRequest: unreachable');
     }
 
     private get namespace() {
@@ -162,13 +192,17 @@ export class YuqueClient {
     // TOC (Table of Contents)
     // ----------------------------------------------------------
 
-    /** Fetch the current TOC of the book */
+    /** Fetch the FULL TOC of the book (handles pagination automatically) */
     async getToc(): Promise<YuqueTocItem[]> {
         try {
-            const res = await this.client.get<{ data: YuqueTocItem[] }>(
-                `/api/v2/repos/${this.groupLogin}/${this.bookSlug}/toc`
-            );
-            return res.data.data;
+            // Yuque TOC API returns all nodes in a single request (no pagination needed),
+            // but we use retryRequest to handle transient 429 errors.
+            return await this.retryRequest(async () => {
+                const res = await this.client.get<{ data: YuqueTocItem[] }>(
+                    `/api/v2/repos/${this.groupLogin}/${this.bookSlug}/toc`
+                );
+                return res.data.data ?? [];
+            });
         } catch (err) {
             this.handleError(err, 'getToc');
         }

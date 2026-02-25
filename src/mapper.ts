@@ -12,18 +12,25 @@ export function toDocSlug(relativePath: string, template?: string): string {
     const dirPath = parsed.dir.replace(/\//g, '-').replace(/\\/g, '-');
     const pathSlug = [dirPath, basename].filter(Boolean).join('-');
 
+    let raw: string;
     if (!template || template === '{basename}') {
-        return slugify(basename);
-    }
-    if (template === '{path}') {
-        return slugify(pathSlug);
+        raw = basename;
+    } else if (template === '{path}') {
+        raw = pathSlug;
+    } else {
+        raw = template
+            .replace('{basename}', basename)
+            .replace('{path}', pathSlug);
     }
 
-    return slugify(
-        template
-            .replace('{basename}', basename)
-            .replace('{path}', pathSlug)
-    );
+    const slug = slugify(raw);
+    if (!slug) {
+        // Fallback: use path-based slug to guarantee non-empty
+        const fallback = slugify(pathSlug) || slugify(relativePath.replace(/\//g, '-')) || 'untitled';
+        console.warn(`[gty] Warning: slug derived from "${relativePath}" is empty, using fallback "${fallback}"`);
+        return fallback;
+    }
+    return slug;
 }
 
 function slugify(str: string): string {
