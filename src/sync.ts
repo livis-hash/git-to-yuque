@@ -1,9 +1,10 @@
 import * as path from 'path';
 import chalk from 'chalk';
+import { minimatch } from 'minimatch';
 import { GtyConfig, SyncResult, YuqueTocItem, GitChange } from './types';
 import { YuqueClient } from './yuque-client';
 import { readFileContent } from './git';
-import { matchFiles, getAllDirPaths, isExcluded, isMarkdown } from './mapper';
+import { matchFiles, getAllDirPaths, isExcluded, isMarkdown, toDocSlug } from './mapper';
 
 interface TocIndex {
     /** Map from directory path (e.g. "docs/guide") to its TOC TITLE node UUID */
@@ -162,28 +163,42 @@ export async function syncChanges(options: {
     const upsertFiles = fileChanges.filter(c => c.type !== 'deleted');
 
     // ----------------------------------------------------------------
-    // Step 1: Handle deleted files → remove from TOC
+    // Step 1: Handle deleted files → remove TOC node + delete Yuque doc
     // ----------------------------------------------------------------
     for (const change of deletedFiles) {
-        const slug = tocIndex.slugToUuid.has(change.path)
-            ? change.path
-            : undefined;
+        // Map the git file path to the doc slug (same logic as upsert)
+        const docSlug = toDocSlug(change.path, config.mappings.find(m =>
+            minimatch(change.path, m.pattern, { dot: true }))
+            ?.docSlug);
 
-        if (config.syncFolders) {
-            const nodeUuid = slug ? tocIndex.slugToUuid.get(change.path) : undefined;
-            if (nodeUuid) {
-                if (!dryRun) {
-                    console.log(chalk.red(`  🗑  Removing TOC node for: ${change.path}`));
-                    await client.removeTocNode(nodeUuid, false);
-                } else {
-                    console.log(chalk.red(`  🗑  [dry-run] Would remove TOC node: ${change.path}`));
-                }
-                results.push({ file: change.path, status: dryRun ? 'dry-run' : 'deleted' });
-            } else {
-                results.push({ file: change.path, status: 'skipped', error: 'No TOC node found' });
+        const tocNodeUuid = tocIndex.slugToUuid.get(docSlug);
+        const docId = tocIndex.slugToDocId.get(docSlug);
+
+        if (dryRun) {
+            console.log(chalk.red(`  🗑  [dry-run] Would delete doc: ${change.path} (slug=${docSlug})`));
+            results.push({ file: change.path, status: 'dry-run', docSlug });
+            continue;
+        }
+
+        try {
+            // 1a. Remove the DOC node from TOC (keeps doc intact but hides from TOC)
+            if (tocNodeUuid) {
+                console.log(chalk.red(`  🗑  Removing TOC node: ${docSlug}`));
+                await client.removeTocNode(tocNodeUuid, false);
+                tocIndex.slugToUuid.delete(docSlug);
+                tocIndex.slugToDocId.delete(docSlug);
             }
-        } else {
-            results.push({ file: change.path, status: 'skipped' });
+
+            // 1b. Delete the Yuque document itself
+            const lookupId = docId ?? docSlug;
+            console.log(chalk.red(`  🗑  Deleting Yuque doc: ${docSlug}`));
+            await client.deleteDoc(lookupId);
+
+            results.push({ file: change.path, status: 'deleted', docSlug });
+        } catch (err) {
+            const error = err instanceof Error ? err.message : String(err);
+            console.error(chalk.red(`    ❌ Error deleting ${change.path}: ${error}`));
+            results.push({ file: change.path, status: 'error', docSlug, error });
         }
     }
 
@@ -268,33 +283,52 @@ export async function syncChanges(options: {
     }
 
     // ----------------------------------------------------------------
-    // Step 3: Detect + remove deleted directories if syncFolders
+    // Step 3: Remove TITLE nodes for directories that are now empty
     // ----------------------------------------------------------------
-    if (config.syncFolders) {
-        const deletedDirPaths = new Set<string>();
-        for (const change of changes.filter(c => c.type === 'deleted')) {
-            const dir = change.path.includes('/')
-                ? change.path.split('/').slice(0, -1).join('/')
-                : null;
-            if (dir) deletedDirPaths.add(dir);
+    if (config.syncFolders && deletedFiles.length > 0) {
+        // Collect all directory paths that had at least one file deleted
+        const affectedDirs = new Set<string>();
+        for (const change of deletedFiles) {
+            const parts = change.path.split('/');
+            // Add all ancestor paths (deepest first for correct removal order)
+            for (let depth = parts.length - 1; depth >= 1; depth--) {
+                affectedDirs.add(parts.slice(0, depth).join('/'));
+            }
         }
 
-        for (const dirPath of deletedDirPaths) {
-            // Only remove if it no longer has active file-based children (approximate heuristic)
-            const stillActive = matched.some(m =>
+        // Sort deepest paths first (children before parents) so we don't
+        // remove a parent before checking if it's truly empty
+        const sortedDirs = [...affectedDirs].sort(
+            (a, b) => b.split('/').length - a.split('/').length
+        );
+
+        for (const dirPath of sortedDirs) {
+            const nodeUuid = tocIndex.dirToUuid.get(dirPath);
+            if (!nodeUuid) continue; // not tracked = skip
+
+            // Check if any file in this directory is still active (upserted in this run)
+            const hasActiveChildren = matched.some(m =>
                 m.relativePath.startsWith(dirPath + '/')
             );
-            if (stillActive) continue;
+            if (hasActiveChildren) continue;
 
-            const nodeUuid = tocIndex.dirToUuid.get(dirPath);
-            if (!nodeUuid) continue;
+            // Check if any remaining TOC items still live under this TITLE node
+            const tocItem = tocIndex.uuidToItem.get(nodeUuid);
+            const hasRemainingTocChildren = tocItem
+                ? [...tocIndex.uuidToItem.values()].some(
+                    n => n.parent_uuid === nodeUuid
+                )
+                : false;
 
-            if (!dryRun) {
-                console.log(chalk.red(`  🗑  Removing TOC group: ${dirPath}`));
-                await client.removeTocNode(nodeUuid, true); // remove with children
-                tocIndex.dirToUuid.delete(dirPath);
+            if (hasRemainingTocChildren) continue;
+
+            if (dryRun) {
+                console.log(chalk.red(`  🗑  [dry-run] Would remove empty TOC group: ${dirPath}`));
             } else {
-                console.log(chalk.red(`  🗑  [dry-run] Would remove TOC group: ${dirPath}`));
+                console.log(chalk.red(`  🗑  Removing empty TOC group: ${dirPath}`));
+                await client.removeTocNode(nodeUuid, false);
+                tocIndex.dirToUuid.delete(dirPath);
+                tocIndex.uuidToItem.delete(nodeUuid);
             }
         }
     }

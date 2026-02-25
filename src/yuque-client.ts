@@ -144,6 +144,20 @@ export class YuqueClient {
         }
     }
 
+    /** Permanently delete a doc by its slug or ID */
+    async deleteDoc(slugOrId: string | number): Promise<void> {
+        try {
+            await this.client.delete(
+                `/api/v2/repos/${this.groupLogin}/${this.bookSlug}/docs/${slugOrId}`
+            );
+        } catch (err) {
+            if (axios.isAxiosError(err) && err.response?.status === 404) {
+                return; // already deleted, that's fine
+            }
+            this.handleError(err, `deleteDoc(${slugOrId})`);
+        }
+    }
+
     // ----------------------------------------------------------
     // TOC (Table of Contents)
     // ----------------------------------------------------------
