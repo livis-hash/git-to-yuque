@@ -160,16 +160,21 @@ export async function syncChanges(options: {
     // Split changes by type
     const fileChanges = changes.filter(c => isMarkdown(c.path) && !isExcluded(c.path, config.exclude));
     const deletedFiles = fileChanges.filter(c => c.type === 'deleted');
+    const renamedFiles = fileChanges.filter(c => c.type === 'renamed' && !!c.oldPath);
+    // upsertFiles includes renamed (new path) so normal create/update applies to the new location
     const upsertFiles = fileChanges.filter(c => c.type !== 'deleted');
+
+    // Helper: derive doc slug from a file path using config mappings
+    const deriveSlug = (filePath: string): string =>
+        toDocSlug(filePath, config.mappings.find(m =>
+            minimatch(filePath, m.pattern, { dot: true }))?.docSlug);
 
     // ----------------------------------------------------------------
     // Step 1: Handle deleted files → remove TOC node + delete Yuque doc
     // ----------------------------------------------------------------
     for (const change of deletedFiles) {
         // Map the git file path to the doc slug (same logic as upsert)
-        const docSlug = toDocSlug(change.path, config.mappings.find(m =>
-            minimatch(change.path, m.pattern, { dot: true }))
-            ?.docSlug);
+        const docSlug = deriveSlug(change.path);
 
         const tocNodeUuid = tocIndex.slugToUuid.get(docSlug);
         const docId = tocIndex.slugToDocId.get(docSlug);
@@ -203,8 +208,52 @@ export async function syncChanges(options: {
     }
 
     // ----------------------------------------------------------------
-    // Step 2: Handle upsert files (added / modified / renamed)
+    // Step 1b: Handle renames/moves → clean up old location,
+    //          then upsert step will create/update at new location
     // ----------------------------------------------------------------
+    for (const change of renamedFiles) {
+        const oldSlug = deriveSlug(change.oldPath!);
+        const newSlug = deriveSlug(change.path);
+        const oldTocNodeUuid = tocIndex.slugToUuid.get(oldSlug);
+        const oldDocId = tocIndex.slugToDocId.get(oldSlug);
+
+        if (dryRun) {
+            if (oldSlug === newSlug) {
+                console.log(chalk.yellow(`  ↩️  [dry-run] Would move (same slug): ${change.oldPath} → ${change.path} (slug=${oldSlug})`));
+            } else {
+                console.log(chalk.yellow(`  ↩️  [dry-run] Would rename: ${change.oldPath} (slug=${oldSlug}) → ${change.path} (slug=${newSlug})`));
+            }
+            continue;
+        }
+
+        try {
+            if (oldSlug === newSlug) {
+                // Same slug, different directory: only remove the old TOC node.
+                // The upsert step (Step 2) will update the doc content and
+                // re-insert the TOC node at the correct new parent group.
+                if (oldTocNodeUuid) {
+                    console.log(chalk.yellow(`  ↩️  Moving (same slug): ${change.oldPath} → ${change.path}`));
+                    await client.removeTocNode(oldTocNodeUuid, false);
+                    tocIndex.slugToUuid.delete(oldSlug);
+                }
+            } else {
+                // Different slug: delete the old Yuque doc entirely.
+                // The upsert step will create a fresh doc at the new slug.
+                if (oldTocNodeUuid) {
+                    await client.removeTocNode(oldTocNodeUuid, false);
+                }
+                if (oldDocId !== undefined || oldSlug) {
+                    console.log(chalk.yellow(`  ↩️  Rename (slug change): deleting old doc "${oldSlug}"...`));
+                    await client.deleteDoc(oldDocId ?? oldSlug);
+                }
+                tocIndex.slugToUuid.delete(oldSlug);
+                tocIndex.slugToDocId.delete(oldSlug);
+            }
+        } catch (err) {
+            const error = err instanceof Error ? err.message : String(err);
+            console.error(chalk.red(`    ❌ Error handling rename of ${change.oldPath}: ${error}`));
+        }
+    }
     const matched = matchFiles(upsertFiles, config);
 
     // Collect all dir paths needed across all files, sorted parent-first
