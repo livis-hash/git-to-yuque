@@ -106,6 +106,27 @@ export function readFileContent(relativePath: string, repoRoot: string): string 
 }
 
 /**
+ * Get all markdown files currently staged (added, copied, modified, renamed).
+ * Used by the pre-commit hook to check only what's about to be committed.
+ */
+export function getStagedMarkdownFiles(cwd: string): string[] {
+    const output = execSync(
+        'git diff --cached --name-only --diff-filter=ACMR',
+        { cwd, encoding: 'utf8' }
+    );
+    return output.split('\n').filter(f => f && /\.(md|markdown|mdx)$/i.test(f));
+}
+
+/**
+ * Get ALL markdown files tracked by git in the repo.
+ * Used for a full-repo slug conflict scan.
+ */
+export function getAllTrackedMarkdownFiles(cwd: string): string[] {
+    const output = execSync('git ls-files', { cwd, encoding: 'utf8' });
+    return output.split('\n').filter(f => f && /\.(md|markdown|mdx)$/i.test(f));
+}
+
+/**
  * Derive a list of unique directory paths from a set of file paths.
  * e.g. "docs/guide/intro.md" → ["docs", "docs/guide"]
  */
