@@ -142,26 +142,41 @@ program
             const repoRoot = getRepoRoot();
             const { config } = loadConfig(repoRoot);
 
-            // Collect files to check
-            const files = opts.all
-                ? getAllTrackedMarkdownFiles(repoRoot)
-                : getStagedMarkdownFiles(repoRoot);
-
-            // Filter by exclude patterns and mappings
-            const matched = files.filter(f => {
+            const filterFn = (f: string) => {
                 if (isExcluded(f, config.exclude)) return false;
                 if (config.mappings.length === 0) return true;
                 return config.mappings.some(m => minimatch(f, m.pattern, { dot: true }));
-            });
+            };
 
-            if (matched.length === 0) {
+            let filesToScan: string[];
+            let stagedSet: Set<string>;
+
+            if (opts.all) {
+                // Full scan: check everything, no notion of "staged"
+                filesToScan = getAllTrackedMarkdownFiles(repoRoot).filter(filterFn);
+                stagedSet = new Set(filesToScan); // treat all as "relevant"
+            } else {
+                // Pre-commit context:
+                // 1. Get staged files (what's about to be committed)
+                // 2. Union with ALL tracked files to catch cross-commit conflicts
+                // 3. Only report a conflict if a STAGED file is involved
+                const staged = getStagedMarkdownFiles(repoRoot).filter(filterFn);
+                const allTracked = getAllTrackedMarkdownFiles(repoRoot).filter(filterFn);
+                stagedSet = new Set(staged);
+
+                // Union: deduplicate (allTracked already includes committed versions of staged files)
+                const unionSet = new Set([...allTracked, ...staged]);
+                filesToScan = [...unionSet];
+            }
+
+            if (filesToScan.length === 0) {
                 console.log(chalk.gray('✅ No markdown files to check.'));
                 return;
             }
 
-            // Derive slug for each file and find duplicates
+            // Derive slug for each file and build a slug → [files] map
             const slugToFiles = new Map<string, string[]>();
-            for (const f of matched) {
+            for (const f of filesToScan) {
                 const rule = config.mappings.find(m => minimatch(f, m.pattern, { dot: true }));
                 const slug = toDocSlug(f, rule?.docSlug);
                 const existing = slugToFiles.get(slug) ?? [];
@@ -169,10 +184,15 @@ program
                 slugToFiles.set(slug, existing);
             }
 
-            const conflicts = [...slugToFiles.entries()].filter(([, files]) => files.length > 1);
+            // A conflict exists only when ≥2 files share a slug
+            // AND at least one of those files is in the staged set (or --all mode)
+            const conflicts = [...slugToFiles.entries()].filter(
+                ([, group]) => group.length > 1 && group.some(f => stagedSet.has(f))
+            );
 
             if (conflicts.length === 0) {
-                console.log(chalk.green(`✅ No slug conflicts found (${matched.length} files checked).`));
+                const scope = opts.all ? filesToScan.length : stagedSet.size;
+                console.log(chalk.green(`✅ No slug conflicts found (${scope} staged file(s) checked against ${filesToScan.length} total).`));
                 return;
             }
 
@@ -181,7 +201,8 @@ program
             for (const [slug, conflictFiles] of conflicts) {
                 console.error(chalk.red(`  slug "${slug}":`));
                 for (const f of conflictFiles) {
-                    console.error(chalk.red(`    - ${f}`));
+                    const tag = stagedSet.has(f) ? chalk.yellow(' ← staged') : chalk.gray(' (existing)');
+                    console.error(chalk.red(`    - ${f}`) + tag);
                 }
             }
             console.error(chalk.yellow(`\n💡 Fix: set docSlug: "{path}" in your .gty.yml mappings to use the full path as slug.`));
