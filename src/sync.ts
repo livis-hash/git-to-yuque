@@ -297,10 +297,32 @@ export async function syncChanges(options: {
                 const updated = await client.updateDoc(existingDoc.id, { body, title });
                 console.log(chalk.green(`    ✅ Updated: ${docSlug} (id=${updated.id})`));
 
-                // Ensure the doc node is in TOC (it might have been created without TOC entry)
-                if (!tocIndex.slugToUuid.has(docSlug)) {
-                    await client.addTocDoc([updated.id], parentUuid);
-                    tocIndex.slugToDocId.set(docSlug, updated.id);
+                const existingNodeUuid = tocIndex.slugToUuid.get(docSlug);
+                const existingNode = existingNodeUuid ? tocIndex.uuidToItem.get(existingNodeUuid) : null;
+                const currentParent = existingNode?.parent_uuid || '';
+
+                if (!existingNodeUuid) {
+                    // Ensure the doc node is in TOC (it might have been created without TOC entry)
+                    const updatedToc = await client.addTocDoc([updated.id], parentUuid);
+                    const newDocNode = updatedToc.find(n => n.type === 'DOC' && n.doc_id === updated.id);
+                    if (newDocNode) {
+                        tocIndex.slugToUuid.set(docSlug, newDocNode.uuid);
+                        tocIndex.slugToDocId.set(docSlug, updated.id);
+                        tocIndex.uuidToItem.set(newDocNode.uuid, newDocNode);
+                    }
+                } else if (config.syncFolders && currentParent !== parentUuid) {
+                    console.log(chalk.yellow(`    ↩️  Moving TOC node to match new directory...`));
+                    await client.removeTocNode(existingNodeUuid, false);
+                    const updatedToc = await client.addTocDoc([updated.id], parentUuid);
+
+                    // Update index so folder cleanup logic knows it moved out
+                    tocIndex.uuidToItem.delete(existingNodeUuid);
+                    const newDocNode = updatedToc.find(n => n.type === 'DOC' && n.doc_id === updated.id);
+                    if (newDocNode) {
+                        tocIndex.slugToUuid.set(docSlug, newDocNode.uuid);
+                        tocIndex.slugToDocId.set(docSlug, updated.id);
+                        tocIndex.uuidToItem.set(newDocNode.uuid, newDocNode);
+                    }
                 }
 
                 results.push({ file: relativePath, status: 'updated', docSlug, docId: updated.id });

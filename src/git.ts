@@ -42,7 +42,7 @@ export function getChangedFilesForPush(
     }
 
     return parseDiffOutput(
-        execSync(`git diff --name-status ${baseRef}..HEAD`, { cwd, encoding: 'utf8' })
+        execSync(`git diff --name-status -M ${baseRef}..HEAD`, { cwd, encoding: 'utf8' })
     );
 }
 
@@ -63,7 +63,7 @@ export function getChangedFilesSinceRemote(cwd: string): GitChange[] {
     }
 
     return parseDiffOutput(
-        execSync(`git diff --name-status ${baseRef}..HEAD`, { cwd, encoding: 'utf8' })
+        execSync(`git diff --name-status -M ${baseRef}..HEAD`, { cwd, encoding: 'utf8' })
     );
 }
 
