@@ -78,25 +78,51 @@ async function ensureTocGroups(
         currentPath = currentPath ? `${currentPath}/${segment}` : segment;
 
         if (tocIndex.dirToUuid.has(currentPath)) {
-            // Group already exists
+            // Group already exists in our index
             parentUuid = tocIndex.dirToUuid.get(currentPath)!;
         } else {
-            // Create the group
             if (!dryRun) {
                 console.log(chalk.blue(`  📁 Creating TOC group: ${currentPath}`));
+
+                // Snapshot known UUIDs before the API call
+                const knownUuids = new Set(tocIndex.uuidToItem.keys());
+
                 const updatedToc = await client.addTocGroup(segment, parentUuid);
-                // Find the newly created node
-                const newNode = updatedToc.find(
-                    n => n.type === 'TITLE' && n.title === segment && n.parent_uuid === parentUuid
+
+                // Find the newly created node: a TITLE with right title that wasn't in our previous snapshot
+                let newNode = updatedToc.find(
+                    n => n.type === 'TITLE' && n.title === segment && !knownUuids.has(n.uuid)
                 );
+
+                // Fallback: match by title + parent_uuid (for already-existing groups we re-use)
+                if (!newNode) {
+                    newNode = updatedToc.find(
+                        n => n.type === 'TITLE' && n.title === segment && n.parent_uuid === parentUuid
+                    );
+                }
+
                 if (newNode) {
                     tocIndex.dirToUuid.set(currentPath, newNode.uuid);
                     tocIndex.uuidToItem.set(newNode.uuid, newNode);
                     parentUuid = newNode.uuid;
+                } else {
+                    // Still not found — rebuild the entire index from the returned TOC
+                    // so we at least have an accurate picture going forward
+                    console.warn(chalk.yellow(`    ⚠ Could not locate new TOC group "${segment}", refreshing index...`));
+                    const refreshed = buildTocIndex(updatedToc);
+                    // Merge refreshed into tocIndex
+                    for (const [k, v] of refreshed.dirToUuid) tocIndex.dirToUuid.set(k, v);
+                    for (const [k, v] of refreshed.uuidToItem) tocIndex.uuidToItem.set(k, v);
+                    for (const [k, v] of refreshed.slugToUuid) tocIndex.slugToUuid.set(k, v);
+                    for (const [k, v] of refreshed.slugToDocId) tocIndex.slugToDocId.set(k, v);
+
+                    if (tocIndex.dirToUuid.has(currentPath)) {
+                        parentUuid = tocIndex.dirToUuid.get(currentPath)!;
+                    }
+                    // else parentUuid stays as-is (best effort)
                 }
             } else {
                 console.log(chalk.blue(`  📁 [dry-run] Would create TOC group: ${currentPath}`));
-                // Use a fake UUID for dry-run to allow nested processing
                 const fakeUuid = `dry-run-${currentPath}`;
                 tocIndex.dirToUuid.set(currentPath, fakeUuid);
                 parentUuid = fakeUuid;
