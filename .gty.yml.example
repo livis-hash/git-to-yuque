@@ -1,0 +1,44 @@
+# git-to-yuque 配置文件示例
+# 复制此文件为 .gty.yml，并填写你的 token 和 namespace
+# cp .gty.yml.example .gty.yml
+
+# 语雀 API Token
+# 强烈推荐通过环境变量设置，避免 token 写入文件后被误提交:
+#   export GTY_TOKEN="your-token-here"
+# 获取方式: 语雀 → 账户设置 → Token
+token: ""
+
+# 语雀知识库 namespace，格式: "用户名或团队login/知识库slug"
+# 例如 https://www.yuque.com/myteam/my-docs 对应 "myteam/my-docs"
+namespace: "your-group/your-book"
+
+# 语雀地址（默认 https://www.yuque.com，无需修改）
+baseUrl: "https://www.yuque.com"
+
+# 文件映射规则：哪些本地文件需要同步，以及如何生成语雀文档 slug
+# pattern 支持 glob 格式；docSlug 支持 {basename}、{path} 模板变量
+# 不配置 mappings 则同步所有 .md 文件
+mappings:
+  - pattern: "docs/**/*.md"
+    # docSlug: "{basename}"   # 可省略，默认使用文件名(不含扩展名)
+
+# 排除的文件/目录（glob 格式），匹配的文件不会同步
+exclude:
+  - "node_modules/**"
+  - ".git/**"
+  - "dist/**"
+  - "build/**"
+  - "CHANGELOG.md"
+  - "**/*.test.md"
+
+# 同步模式
+# create-or-update: 文档不存在时创建，存在时更新（默认）
+# update-only: 只更新已存在的文档，跳过新文档
+syncMode: "create-or-update"
+
+# 是否将本地文件夹结构同步为语雀目录分组
+# true: 本地 docs/guide/intro.md 会在语雀创建 "guide" 分组，intro 文档在其下
+syncFolders: true
+
+# 如果语雀同步失败，是否仍然允许 git push 继续（true = 不阻断 push）
+continueOnError: true

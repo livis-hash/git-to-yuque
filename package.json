@@ -1,0 +1,55 @@
+{
+  "name": "git-to-yuque",
+  "version": "1.0.0",
+  "description": "Sync local git file changes to Yuque documents via pre-push hook",
+  "main": "dist/cli.js",
+  "bin": {
+    "gty": "dist/cli.js"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE",
+    ".gty.yml.example"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/cli.ts",
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "yuque",
+    "git",
+    "sync",
+    "markdown",
+    "pre-push",
+    "hook"
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/livis-hash/git-to-yuque#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/livis-hash/git-to-yuque.git"
+  },
+  "bugs": {
+    "url": "https://github.com/livis-hash/git-to-yuque/issues"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "chalk": "^4.1.2",
+    "commander": "^12.1.0",
+    "js-yaml": "^4.1.0",
+    "minimatch": "^9.0.5"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/minimatch": "^5.1.2",
+    "@types/node": "^22.10.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.2"
+  }
+}
