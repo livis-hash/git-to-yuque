@@ -167,9 +167,7 @@ export async function syncChanges(options: {
     const upsertFiles = fileChanges.filter(c => c.type !== 'deleted');
 
     // Helper: derive doc slug from a file path using config mappings
-    const deriveSlug = (filePath: string): string =>
-        toDocSlug(filePath, config.mappings.find(m =>
-            minimatch(filePath, m.pattern, { dot: true }))?.docSlug);
+    const deriveSlug = (filePath: string): string => toDocSlug(filePath);
 
     // ----------------------------------------------------------------
     // Step 1: Handle deleted files → remove TOC node + delete Yuque doc

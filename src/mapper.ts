@@ -2,44 +2,17 @@ import * as path from 'path';
 import { minimatch } from 'minimatch';
 import { GtyConfig, MappedFile, GitChange } from './types';
 
+import * as crypto from 'crypto';
+
 /**
  * Convert a relative file path to a Yuque doc slug.
- * Supports template variables: {basename}, {path}
+ * Since Yuque API doesn't support Chinese paths, we hash the path to guarantee uniqueness and validity.
  */
-export function toDocSlug(relativePath: string, template?: string): string {
-    const parsed = path.parse(relativePath);
-    const basename = parsed.name; // filename without extension
-    const dirPath = parsed.dir.replace(/\//g, '-').replace(/\\/g, '-');
-    const pathSlug = [dirPath, basename].filter(Boolean).join('-');
-
-    let raw: string;
-    if (!template || template === '{basename}') {
-        raw = basename;
-    } else if (template === '{path}') {
-        raw = pathSlug;
-    } else {
-        raw = template
-            .replace('{basename}', basename)
-            .replace('{path}', pathSlug);
-    }
-
-    const slug = slugify(raw);
-    if (!slug) {
-        // Fallback: use path-based slug to guarantee non-empty
-        const fallback = slugify(pathSlug) || slugify(relativePath.replace(/\//g, '-')) || 'untitled';
-        console.warn(`[gty] Warning: slug derived from "${relativePath}" is empty, using fallback "${fallback}"`);
-        return fallback;
-    }
-    return slug;
+export function toDocSlug(relativePath: string): string {
+    return crypto.createHash('md5').update(relativePath).digest('hex').substring(0, 8);
 }
 
-function slugify(str: string): string {
-    return str
-        .toLowerCase()
-        .replace(/[^a-z0-9\u4e00-\u9fa5_-]/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^-|-$/g, '');
-}
+
 
 /**
  * Derive a human-readable title from a file path.
@@ -97,7 +70,7 @@ export function matchFiles(
             let matched = false;
             for (const rule of mappings) {
                 if (minimatch(relativePath, rule.pattern, { dot: true, matchBase: false })) {
-                    docSlug = toDocSlug(relativePath, rule.docSlug);
+                    docSlug = toDocSlug(relativePath);
                     matched = true;
                     break;
                 }

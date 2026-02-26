@@ -177,8 +177,7 @@ program
             // Derive slug for each file and build a slug → [files] map
             const slugToFiles = new Map<string, string[]>();
             for (const f of filesToScan) {
-                const rule = config.mappings.find(m => minimatch(f, m.pattern, { dot: true }));
-                const slug = toDocSlug(f, rule?.docSlug);
+                const slug = toDocSlug(f);
                 const existing = slugToFiles.get(slug) ?? [];
                 existing.push(f);
                 slugToFiles.set(slug, existing);
